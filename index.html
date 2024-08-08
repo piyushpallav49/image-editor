@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Image Editor GUI</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.12/cropper.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.12/cropper.min.css">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f0f0f0;
+        }
+        .container {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+        .image-container, .controls-container {
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+            flex: 1;
+            min-width: 300px;
+        }
+        .image-container {
+            min-height: 400px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        #imagePreview {
+            max-width: 100%;
+            max-height: 400px;
+        }
+        .controls-container {
+            display: flex;
+            flex-direction: column;
+        }
+        .toggle-section {
+            margin-top: 20px;
+        }
+        .toggle-container {
+            display: flex;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        .toggle {
+            margin-right: 10px;
+        }
+        .hidden {
+            display: none;
+        }
+        button {
+            margin-top: 10px;
+            padding: 10px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        input[type="number"], select {
+            width: 100%;
+            padding: 5px;
+            margin-top: 5px;
+        }
+        #imageInfo {
+            background-color: #f9f9f9;
+            padding: 10px;
+            border-radius: 4px;
+            margin-top: 10px;
+        }
+        label {
+            font-weight: bold;
+        }
+        .option-group {
+            margin-left: 25px;
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="image-container">
+            <img id="imagePreview" src="" alt="Preview">
+        </div>
+        <div class="controls-container">
+            <input type="file" id="imageInput" accept="image/*">
+            <div id="imageInfo"></div>
+            <div class="toggle-section">
+                <div class="toggle-container">
+                    <input type="checkbox" id="cropToggle" class="toggle" checked>
+                    <label for="cropToggle">Crop</label>
+                </div>
+                <div id="cropOptions" class="option-group">
+                    <select id="aspectRatio">
+                        <option value="1:1">1:1</option>
+                        <option value="2:3">2:3</option>
+                        <option value="3:2">3:2</option>
+                        <option value="4:3">4:3</option>
+                        <option value="3:4">3:4</option>
+                        <option value="16:9">16:9</option>
+                        <option value="9:16">9:16</option>
+                        <option value="custom">Custom</option>
+                    </select>
+                    <div id="customRatio" class="hidden">
+                        <input type="number" id="customWidth" placeholder="Width">
+                        <input type="number" id="customHeight" placeholder="Height">
+                    </div>
+                </div>
+                <div class="toggle-container">
+                    <input type="checkbox" id="resizeToggle" class="toggle">
+                    <label for="resizeToggle">Resize</label>
+                </div>
+                <div id="resizeOptions" class="option-group hidden">
+                    <input type="number" id="resizeWidth" placeholder="Width">
+                    <input type="number" id="resizeHeight" placeholder="Height">
+                </div>
+                <div class="toggle-container">
+                    <input type="checkbox" id="compressToggle" class="toggle">
+                    <label for="compressToggle">Compress</label>
+                </div>
+            </div>
+            <button id="saveJpeg">Save as JPEG</button>
+            <button id="savePng">Save as PNG</button>
+            <button id="saveWebp">Save as WebP</button>
+        </div>
+    </div>
+
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        let originalImage = null;
+        let cropper = null;
+
+        const imageInput = document.getElementById('imageInput');
+        const imagePreview = document.getElementById('imagePreview');
+        const cropToggle = document.getElementById('cropToggle');
+        const cropOptions = document.getElementById('cropOptions');
+        const aspectRatioSelect = document.getElementById('aspectRatio');
+        const customRatioDiv = document.getElementById('customRatio');
+        const customWidthInput = document.getElementById('customWidth');
+        const customHeightInput = document.getElementById('customHeight');
+        const resizeToggle = document.getElementById('resizeToggle');
+        const resizeOptions = document.getElementById('resizeOptions');
+        const resizeWidthInput = document.getElementById('resizeWidth');
+        const resizeHeightInput = document.getElementById('resizeHeight');
+        const saveJpegButton = document.getElementById('saveJpeg');
+        const savePngButton = document.getElementById('savePng');
+        const saveWebpButton = document.getElementById('saveWebp');
+
+        imageInput.addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(event) {
+                    originalImage = new Image();
+                    originalImage.onload = function() {
+                        displayImageInfo(file, this);
+                        imagePreview.src = event.target.result;
+                        if (cropper) {
+                            cropper.destroy();
+                        }
+                        initializeCropper();
+                    };
+                    originalImage.src = event.target.result;
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+
+        function displayImageInfo(file, img) {
+            const info = `
+                File Name: ${file.name}
+                File Size: ${(file.size / 1024).toFixed(2)} KB
+                File Format: ${file.type}
+                Aspect Ratio: ${calculateAspectRatio(img.width, img.height)}
+                Resolution: ${img.width} x ${img.height} pixels
+            `;
+            document.getElementById('imageInfo').innerText = info;
+        }
+
+        function calculateAspectRatio(width, height) {
+            const gcd = (a, b) => b === 0 ? a : gcd(b, a % b);
+            const divisor = gcd(width, height);
+            return `${width / divisor}:${height / divisor}`;
+        }
+
+        function initializeCropper() {
+            cropper = new Cropper(imagePreview, {
+                aspectRatio: 1,
+                viewMode: 1,
+                dragMode: 'move',
+                autoCropArea: 1,
+                restore: false,
+                guides: true,
+                center: true,
+                highlight: false,
+                cropBoxMovable: true,
+                cropBoxResizable: true,
+                toggleDragModeOnDblclick: false,
+                ready: function() {
+                    this.cropper.crop();
+                    document.querySelector('.cropper-container').style.display = 'block';
+                }
+            });
+        }
+
+        cropToggle.addEventListener('change', function() {
+            cropOptions.classList.toggle('hidden',!this.checked);
+            if (this.checked) {
+                cropper.enable();
+                cropper.crop();
+                document.querySelector('.cropper-container').style.display = 'block';
+            } else {
+                cropper.disable();
+                cropper.clear();
+                document.querySelector('.cropper-container').style.display = 'none';
+            }
+            updateResizeInputs();
+        });
+
+        aspectRatioSelect.addEventListener('change', function() {
+            if (this.value === 'custom') {
+                customRatioDiv.classList.remove('hidden');
+            } else {
+                customRatioDiv.classList.add('hidden');
+                const [width, height] = this.value.split(':');
+                cropper.setAspectRatio(width / height);
+            }
+            updateResizeInputs();
+        });
+
+        customWidthInput.addEventListener('input', updateCustomRatio);
+        customHeightInput.addEventListener('input', updateCustomRatio);
+
+        function updateCustomRatio() {
+            const width = customWidthInput.value;
+            const height = customHeightInput.value;
+            if (width && height) {
+                cropper.setAspectRatio(width / height);
+                updateResizeInputs();
+            }
+        }
+
+        resizeToggle.addEventListener('change', updateResizeInputs);
+
+        function updateResizeInputs() {
+            resizeOptions.classList.toggle('hidden', !resizeToggle.checked);
+
+            if (resizeToggle.checked) {
+                let width, height;
+                if (cropToggle.checked) {
+                    const cropData = cropper.getCropBoxData();
+                    width = Math.round(cropData.width);
+                    height = Math.round(cropData.height);
+                } else {
+                    width = originalImage.width;
+                    height = originalImage.height;
+                }
+                resizeWidthInput.value = width;
+                resizeHeightInput.value = height;
+            }
+        }
+
+        resizeWidthInput.addEventListener('input', function() {
+            const aspectRatio = getAspectRatio();
+            resizeHeightInput.value = Math.round(this.value / aspectRatio);
+        });
+
+        resizeHeightInput.addEventListener('input', function() {
+            const aspectRatio = getAspectRatio();
+            resizeWidthInput.value = Math.round(this.value * aspectRatio);
+        });
+
+        function getAspectRatio() {
+            if (cropToggle.checked) {
+                const cropData = cropper.getCropBoxData();
+                return cropData.width / cropData.height;
+            } else {
+                return originalImage.width / originalImage.height;
+            }
+        }
+
+        function getProcessedImage() {
+            let canvas;
+
+            // Step 1: Crop
+            if (cropToggle.checked) {
+                canvas = cropper.getCroppedCanvas();
+            } else {
+                canvas = document.createElement('canvas');
+                canvas.width = originalImage.width;
+                canvas.height = originalImage.height;
+                canvas.getContext('2d').drawImage(originalImage, 0, 0);
+            }
+
+            // Step 2: Resize
+            if (resizeToggle.checked) {
+                const width = parseInt(resizeWidthInput.value);
+                const height = parseInt(resizeHeightInput.value);
+                const resizeCanvas = document.createElement('canvas');
+                resizeCanvas.width = width;
+                resizeCanvas.height = height;
+                resizeCanvas.getContext('2d').drawImage(canvas, 0, 0, width, height);
+                canvas = resizeCanvas;
+            }
+
+            return canvas;
+        }
+
+        function saveImage(format) {
+            const canvas = getProcessedImage();
+            const originalFileName = imageInput.files[0].name.split('.')[0];
+            const fileName = prompt("Enter file name:", originalFileName) || originalFileName;
+            const link = document.createElement('a');
+            link.download = `${fileName}.${format}`;
+
+            // Step 3: Compress (if toggled on)
+            const quality = document.getElementById('compressToggle').checked ? 0.7 : 1;
+            
+            // Step 4: Convert to specified format
+            link.href = canvas.toDataURL(`image/${format}`, quality);
+            link.click();
+        }
+
+        saveJpegButton.addEventListener('click', () => saveImage('jpeg'));
+        savePngButton.addEventListener('click', () => saveImage('png'));
+        saveWebpButton.addEventListener('click', () => saveImage('webp'));
+    });
+    </script>
+</body>
+</html>
